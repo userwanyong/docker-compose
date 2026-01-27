@@ -1,0 +1,301 @@
+# 命令执行 docker compose -f docker-compose-environment.yml up -d
+# 注意：一些容器虽然基于mysql启动成功再创建，但可能mysql启动后还未创建对应资源就创建其他容器，再这样就会导致其他容器启动失败，直接重启失败容器即可
+#version: '3.9'
+services:
+  mysql:
+    image: mysql:8.0.32
+    container_name: mysql
+    command: --default-authentication-plugin=mysql_native_password
+    #    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: 12123
+    networks:
+      - my-network
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./mysql/my.cnf:/etc/mysql/conf.d/mysql.cnf
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/log:/var/log
+      - ./mysql/sql:/docker-entrypoint-initdb.d
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  redis:
+    image: redis:6.2
+    container_name: redis
+    #    restart: unless-stopped
+    ports:
+      - "16379:6379"
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - ./redis/data:/data
+      - ./redis/logs:/var/log/redis
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - my-network
+
+  canal-server:
+    image: canal/canal-server:v1.1.7
+    container_name: canal-server
+    #    restart: unless-stopped
+    ports:
+      - "11111:11111"
+    volumes:
+      - ./canal-server/instance.properties:/home/admin/canal-server/conf/example/instance.properties
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    depends_on:
+      - mysql
+      - elasticsearch
+    networks:
+      - my-network
+
+  canal-adapter:
+    image: dyrnq/canal-adapter:1.1.7
+    container_name: canal-adapter
+    #    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./canal-adapter/logback.xml:/home/admin/canal-adapter/conf/logback.xml
+      - ./canal-adapter/application.yml:/home/admin/canal-adapter/conf/application.yml
+      - ./canal-adapter/bootstrap.yml:/home/admin/canal-adapter/conf/bootstrap.yml
+      - ./canal-adapter/es7:/home/admin/canal-adapter/conf/es7
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    depends_on:
+      - canal-server
+    networks:
+      - my-network
+
+  # http://127.0.0.1:15672 admin/admin
+  rabbitmq:
+    image: rabbitmq:3.12.9
+    container_name: rabbitmq
+    #    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin
+    command: rabbitmq-server
+    volumes:
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - my-network
+
+  zookeeper:
+    image: zookeeper:3.9.0
+    container_name: zookeeper
+#    restart: unless-stopped
+    hostname: zoo1
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=zookeeper:2888:3888;2181
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - my-network
+
+  # http://127.0.0.1:9091/xxl-job-admin admin/123456
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:2.4.1
+    container_name: xxl-job-admin
+    #    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/xxl_job?serverTimezone=UTC&characterEncoding=utf8&autoReconnect=true&serverTimezone=Asia/Shanghai
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=12123
+      - SERVER_PORT=9090
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    depends_on:
+      - mysql
+    networks:
+      - my-network
+
+  elasticsearch:
+    image: elasticsearch:7.17.14
+    ports:
+      - '9200:9200'
+      - '9300:9300'
+    container_name: elasticsearch
+    #    restart: unless-stopped
+    volumes:
+      - ./es/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+      - ./es/config/log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    environment:
+      - 'cluster.name=elasticsearch' # 设置集群名称为elasticsearch
+      - 'discovery.type=single-node' # 以单一节点模式启动
+      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m' # 设置使用jvm内存大小
+    networks:
+      - my-network
+
+  # http://127.0.0.1:5601  需要先在es初始化密码再创建 [初始化密码：docker exec -it elasticsearch bin/elasticsearch-setup-passwords auto]
+  kibana:
+    image: kibana:7.17.14
+    container_name: kibana
+    #    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime
+      - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    ports:
+      - '5601:5601'
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200 #设置访问elasticsearch的地址
+      - I18N_LOCALE=zh-CN
+      - LOGGING_QUIET=true        # 等价于只输出 WARN/ERROR
+    depends_on:
+      - elasticsearch
+    networks:
+      - my-network
+
+  # 需要先在es初始化密码再创建 [初始化密码：docker exec -it elasticsearch bin/elasticsearch-setup-passwords auto]
+  logstash:
+    image: logstash:7.17.14
+    container_name: logstash
+    #    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime
+      - ./logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    ports:
+      - '4560:4560'
+      - '50000:50000/tcp'
+      - '50000:50000/udp'
+      - '9600:9600'
+    environment:
+      LS_JAVA_OPTS: -Xms1024m -Xmx1024m
+      TZ: Asia/Shanghai
+      MONITORING_ENABLED: false
+    depends_on:
+      - elasticsearch
+    networks:
+      - my-network
+
+  pgvector:
+    image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/pgvector:v0.5.0
+    container_name: pgvector
+#    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgre
+      - POSTGRES_PASSWORD=postgre
+      - POSTGRES_DB=ai-rag-knowledge
+      - PGPASSWORD=postgre
+    volumes:
+      - ./pgvector/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    ports:
+      - '5432:5432'
+    networks:
+      - my-network
+
+  # 127.0.0.1:8080 nacos/nacos
+  nacos:
+    image: nacos/nacos-server
+    container_name: nacos
+    #    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    environment:
+      - PREFER_HOST_MODE=hostname
+      - MODE=standalone
+      - SPRING_DATASOURCE_PLATFORM=mysql
+      - MYSQL_SERVICE_HOST=mysql
+      - MYSQL_SERVICE_DB_NAME=nacos
+      - MYSQL_SERVICE_PORT=3306
+      - MYSQL_SERVICE_USER=root
+      - MYSQL_SERVICE_PASSWORD=12123
+      - MYSQL_SERVICE_DB_PARAM=characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true
+      - NACOS_AUTH_IDENTITY_KEY=2222
+      - NACOS_AUTH_IDENTITY_VALUE=2xxx
+      - NACOS_AUTH_TOKEN=SecretKey012345678901234567890123456789012345678901234567890123456789
+    depends_on:
+      - mysql
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - my-network
+
+  # 数据采集
+  prometheus:
+    image: bitnami/prometheus:2.47.2
+    container_name: prometheus
+    #    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - my-network
+
+  # http://127.0.0.1:4000 admin/admin
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    #    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    depends_on:
+      - prometheus
+    volumes:
+      - ./grafana:/etc/grafana
+    environment: # 是否配置自己的数据库
+      - GF_DATABASE_TYPE=mysql
+      - GF_DATABASE_HOST=mysql:3306
+      - GF_DATABASE_NAME=grafana
+      - GF_DATABASE_USER=root
+      - GF_DATABASE_PASSWORD=12123
+    networks:
+      - my-network
+
+
+
+networks:
+  my-network:
+    driver: bridge

@@ -1,0 +1,17 @@
+dataSourceKey: marketing_01
+destination: example
+groupId: g1
+esMapping:
+  _index: marketing.credit_account
+  _id: _id
+  sql: "select  t.id AS _id,
+                t.user_id AS _user_id,
+                t.activity_id AS _activity_id,
+                t.total_amount AS _total_amount,
+                t.available_amount AS _available_amount,
+                t.account_status AS _account_status,
+                t.create_time AS _create_time,
+                t.update_time AS _update_time 
+        from credit_account t"
+  etlCondition: "where t.update_time>={}"
+  commitBatch: 3000

@@ -1,0 +1,18 @@
+dataSourceKey: marketing_02
+destination: example
+groupId: g1
+esMapping:
+  _index: marketing.task
+  _id: _id
+  sql: "select  t.id AS _id,
+                t.topic AS _topic,
+                t.user_id AS _user_id,
+                t.activity_id AS _activity_id,
+                t.message_id AS _message_id,
+                t.message AS _message,
+                t.state AS _state,
+                t.create_time AS _create_time,
+                t.update_time AS _update_time
+        from task t"
+  etlCondition: "where t.update_time>={}"
+  commitBatch: 3000

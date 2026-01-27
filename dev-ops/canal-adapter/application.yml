@@ -1,0 +1,46 @@
+server:
+  port: 8081
+spring:
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+canal.conf:
+  mode: tcp #tcp kafka rocketMQ rabbitMQ
+  flatMessage: true
+  zookeeperHosts:
+  syncBatchSize: 1000
+  retries: -1
+  timeout:
+  accessKey:
+  secretKey:
+  consumerProperties:
+    canal.tcp.server.host: canal-server:11111
+    canal.tcp.zookeeper.hosts:
+    canal.tcp.batch.size: 500
+    canal.tcp.username:
+    canal.tcp.password:
+
+  # 需要同步的数据库配置
+  srcDataSources:
+    marketing_01:
+      url: jdbc:mysql://mysql:3306/marketing_01?useUnicode=true&serverTimezone=Asia/Shanghai
+      username: canal
+      password: canal
+    marketing_02:
+      url: jdbc:mysql://mysql:3306/marketing_02?useUnicode=true&serverTimezone=Asia/Shanghai
+      username: canal
+      password: canal
+  canalAdapters:
+    - instance: example # canal instance Name or mq topic name
+      groups:
+        - groupId: g1
+          outerAdapters:
+            - name: logger
+            - name: es7
+              hosts: http://elasticsearch:9200 # 127.0.0.1:9200 for rest mode
+              properties:
+                mode: rest # transport or rest
+                cluster.name: elasticsearch
+                security.auth: elastic:xxxxxxxx # 生产环境需开启认证

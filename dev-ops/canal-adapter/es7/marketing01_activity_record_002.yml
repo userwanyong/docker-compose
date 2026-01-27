@@ -1,0 +1,22 @@
+dataSourceKey: marketing_01
+destination: example
+groupId: g1
+esMapping:
+  _index: marketing.activity_record
+  _id: _id
+  sql: "select  t.id as _id, 
+                  t.user_id as _user_id,
+                  t.sku as _sku,
+                  t.activity_id as _activity_id,
+                  t.activity_name as _activity_name,
+                  t.total_count as _total_count,
+                  t.day_count as _day_count,
+                  t.month_count as _month_count,
+                  t.pay_amount as _pay_amount,
+                  t.state as _state,
+                  t.out_business_no as _out_business_no,
+                  t.create_time as _create_time,
+                  t.update_time as _update_time
+          from activity_record_002 t"
+  etlCondition: "where t.update_time>={}"
+  commitBatch: 3000

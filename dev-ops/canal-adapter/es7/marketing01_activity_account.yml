@@ -1,0 +1,21 @@
+#全量导入数据： curl.exe -X POST http://115.190.238.109:8082/etl/es7/marketing01_activity_account.yml
+dataSourceKey: marketing_01
+destination: example
+groupId: g1
+esMapping:
+  _index: marketing.activity_account
+  _id: _id
+  sql: "select  t.id AS _id,
+                t.user_id AS _user_id,
+                t.activity_id AS _activity_id,
+                t.total_count AS _total_count,
+                t.total_count_surplus AS _total_count_surplus,
+                t.day_count AS _day_count,
+                t.day_count_surplus AS _day_count_surplus,
+                t.month_count AS _month_count,
+                t.month_count_surplus AS _month_count_surplus,
+                t.create_time AS _create_time,
+                t.update_time AS _update_time 
+        from activity_account t"
+  etlCondition: "where t.update_time>={}"
+  commitBatch: 3000

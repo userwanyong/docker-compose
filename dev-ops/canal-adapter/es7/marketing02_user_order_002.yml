@@ -1,0 +1,17 @@
+dataSourceKey: marketing_02
+destination: example
+groupId: g1
+esMapping:
+  _index: marketing.user_order
+  _id: _id
+  sql: "select  t.id as _id, 
+                t.user_id as _user_id,
+                t.activity_id as _activity_id,
+                t.activity_name as _activity_name,
+                t.strategy_id as _strategy_id,
+                t.order_state as _order_state,
+                t.create_time as _create_time,
+                t.update_time as _update_time
+        from user_order_002 t"
+  etlCondition: "where t.update_time>={}"
+  commitBatch: 3000

@@ -1,0 +1,20 @@
+dataSourceKey: marketing_01
+destination: example
+groupId: g1
+esMapping:
+  _index: marketing.user_award_record
+  _id: _id
+  sql: "select  t.id AS _id,
+                t.user_id AS _user_id,
+                t.activity_id AS _activity_id,
+                t.strategy_id AS _strategy_id,
+                t.user_order_id AS _user_order_id,
+                t.award_id AS _award_id,
+                t.award_title AS _award_title,
+                t.award_time AS _award_time,
+                t.award_state AS _award_state,
+                t.create_time AS _create_time,
+                t.update_time AS _update_time 
+        from user_award_record_001 t"
+  etlCondition: "where t.update_time>={}"
+  commitBatch: 3000

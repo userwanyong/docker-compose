@@ -1,0 +1,14 @@
+# 启用监控（可选，但建议开启以消除警告）
+xpack.monitoring.enabled: true
+
+# 监控连接的 Elasticsearch 地址
+xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+# 认证凭据（必须！）
+xpack.monitoring.elasticsearch.username: "elastic"
+xpack.monitoring.elasticsearch.password: "xxx"
+
+# 可选：消除 ECS 兼容性警告
+pipeline.ecs_compatibility: disabled
+
+log.level: error
