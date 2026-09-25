@@ -1,6 +1,7 @@
 # =====================================================================
 # 基础环境编排（生产环境标准配置）
 # 命令执行 docker compose -f docker-compose-environment.yml up -d
+# 可选执行 docker compose -f docker-compose-environment.yml up -d mysql redis rabbitmq
 #
 # 本文件遵循的生产约定：
 #   1. 所有服务 restart: unless-stopped：异常退出自动重启，宿主机/守护进程重启后自动恢复，
@@ -96,6 +97,8 @@ services:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
+      zookeeper:
+        condition: service_healthy
     networks:
       - my-network
 
@@ -126,7 +129,7 @@ services:
     networks:
       - my-network
 
-  # http://127.0.0.1:15672 admin/admin
+  # http://127.0.0.1:15672 admin/123456
   rabbitmq:
     image: rabbitmq:3.12.9
     container_name: rabbitmq
@@ -288,8 +291,7 @@ services:
     environment:
       TZ: Asia/Shanghai
       LS_JAVA_OPTS: "-Xms1024m -Xmx1024m"
-      MONITORING_ENABLED: false
-      ELASTIC_PASSWORD: 12123  # 供 logstash.yml / logstash.conf 中 ${ELASTIC_PASSWORD} 引用
+      ELASTIC_PASSWORD: 123456  # 供 logstash.yml / logstash.conf 中 ${ELASTIC_PASSWORD} 引用
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS 'http://127.0.0.1:9600/?pretty' || exit 1"]
       interval: 15s
@@ -434,7 +436,7 @@ services:
     environment:
       TZ: Asia/Shanghai
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: 12345678  # MinIO要求密码至少8位，123456不合法，故用12345678
+      MINIO_ROOT_PASSWORD: 12345678  # MinIO要求密码至少8位
     ports:
       - "9000:9000"
       - "9001:9001"
