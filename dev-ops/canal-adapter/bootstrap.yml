@@ -1,3 +1,5 @@
+# canal 用户为 MySQL 业务账号（由初始化SQL创建），修改其密码需同步更新：
+# canal-server/instance.properties、本文件、canal-adapter/application.yml(srcDataSources两处)
 canal:
   manager:
     jdbc:

@@ -5,8 +5,9 @@ xpack.monitoring.enabled: true
 xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
 
 # 认证凭据（必须！）
+# 密码引用 compose 注入的环境变量，改密码只改 compose，此处自动跟随
 xpack.monitoring.elasticsearch.username: "elastic"
-xpack.monitoring.elasticsearch.password: "xxx"
+xpack.monitoring.elasticsearch.password: "${ELASTIC_PASSWORD}"
 
 # 可选：消除 ECS 兼容性警告
 pipeline.ecs_compatibility: disabled

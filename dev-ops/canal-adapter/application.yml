@@ -23,6 +23,7 @@ canal.conf:
     canal.tcp.password:
 
   # 需要同步的数据库配置
+  # canal 用户为 MySQL 业务账号，改其密码需同步：canal-server/instance.properties、canal-adapter/bootstrap.yml、本文件
   srcDataSources:
     marketing_01:
       url: jdbc:mysql://mysql:3306/marketing_01?useUnicode=true&serverTimezone=Asia/Shanghai
@@ -43,4 +44,4 @@ canal.conf:
               properties:
                 mode: rest # transport or rest
                 cluster.name: elasticsearch
-                security.auth: elastic:xxxxxxxx # 生产环境需开启认证
+                security.auth: elastic:123456 # 与 compose 中 ELASTIC_PASSWORD 保持一致，修改密码后需同步手改此处
