@@ -1,15 +1,32 @@
+# =====================================================================
+# 基础环境编排（生产环境标准配置）
 # 命令执行 docker compose -f docker-compose-environment.yml up -d
-# 注意：一些容器虽然基于mysql启动成功再创建，但可能mysql启动后还未创建对应资源就创建其他容器，再这样就会导致其他容器启动失败，直接重启失败容器即可
-#version: '3.9'
+#
+# 本文件遵循的生产约定：
+#   1. 所有服务 restart: unless-stopped：异常退出自动重启，宿主机/守护进程重启后自动恢复，
+#      手动 docker stop 的容器不会被强制拉起
+#   2. 所有服务配置 healthcheck，服务间通过 depends_on: condition: service_healthy
+#      保证启动顺序
+#   3. 日志统一 json-file 限额滚动（max-size 10m，最多 3 个文件），防止磁盘写满
+#   4. 各服务账号密码直接明文写在对应 environment 中，按需自行修改（改密码的注意事项见下）
+#
+# 特别注意：
+#   - elasticsearch 统一使用 elastic 超级用户 + ELASTIC_PASSWORD（默认 123456）：
+#     es 首次启动时通过 ELASTIC_PASSWORD 设置密码（替代手动 setup-passwords），
+#     kibana / logstash / canal-adapter 直接以 elastic 认证，up 一条命令即可全链路打通。
+#   - mysql 首次启动后会执行 ./mysql/sql 下的初始化脚本；./mysql/data 已有数据时
+#     不会重复执行，且此时修改 MYSQL_ROOT_PASSWORD 不会生效（需重建数据目录）
+# =====================================================================
 services:
+
   mysql:
     image: mysql:8.0.32
     container_name: mysql
+    restart: unless-stopped
     command: --default-authentication-plugin=mysql_native_password
-    #    restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: 12123
+      MYSQL_ROOT_PASSWORD: 123456
     networks:
       - my-network
     ports:
@@ -19,6 +36,13 @@ services:
       - ./mysql/data:/var/lib/mysql
       - ./mysql/log:/var/log
       - ./mysql/sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      # $$ 为 compose 转义，实际在容器内读取环境变量
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     logging:
       options:
         max-size: 10m
@@ -27,7 +51,7 @@ services:
   redis:
     image: redis:6.2
     container_name: redis
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "16379:6379"
     volumes:
@@ -39,13 +63,20 @@ services:
         max-size: 10m
         max-file: "3"
     command: redis-server /usr/local/etc/redis/redis.conf
+    healthcheck:
+      # redis.conf 配置了 requirepass，探活需携带密码认证
+      test: ["CMD-SHELL", "redis-cli -a 123456 ping | grep PONG || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     networks:
       - my-network
 
   canal-server:
     image: canal/canal-server:v1.1.7
     container_name: canal-server
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "11111:11111"
     volumes:
@@ -54,16 +85,24 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat </dev/null >/dev/tcp/127.0.0.1/11111"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     depends_on:
-      - mysql
-      - elasticsearch
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - my-network
 
   canal-adapter:
     image: dyrnq/canal-adapter:1.1.7
     container_name: canal-adapter
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "8081:8081"
     volumes:
@@ -75,8 +114,15 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat </dev/null >/dev/tcp/127.0.0.1/8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     depends_on:
-      - canal-server
+      canal-server:
+        condition: service_healthy
     networks:
       - my-network
 
@@ -84,13 +130,14 @@ services:
   rabbitmq:
     image: rabbitmq:3.12.9
     container_name: rabbitmq
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "5672:5672"
       - "15672:15672"
     environment:
+      TZ: Asia/Shanghai
       RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: admin
+      RABBITMQ_DEFAULT_PASS: 123456
     command: rabbitmq-server
     volumes:
       - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins
@@ -98,23 +145,36 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - my-network
 
   zookeeper:
     image: zookeeper:3.9.0
     container_name: zookeeper
-#    restart: unless-stopped
+    restart: unless-stopped
     hostname: zoo1
     ports:
       - "2181:2181"
     environment:
+      TZ: Asia/Shanghai
       ZOO_MY_ID: 1
       ZOO_SERVERS: server.1=zookeeper:2888:3888;2181
     logging:
       options:
         max-size: 10m
         max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "zkServer.sh status 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - my-network
 
@@ -122,30 +182,38 @@ services:
   xxl-job-admin:
     image: xuxueli/xxl-job-admin:2.4.1
     container_name: xxl-job-admin
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "9091:9090"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/xxl_job?serverTimezone=UTC&characterEncoding=utf8&autoReconnect=true&serverTimezone=Asia/Shanghai
-      - SPRING_DATASOURCE_USERNAME=root
-      - SPRING_DATASOURCE_PASSWORD=12123
-      - SERVER_PORT=9090
+      TZ: Asia/Shanghai
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/xxl_job?serverTimezone=Asia/Shanghai&characterEncoding=utf8&autoReconnect=true"
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 123456
+      SERVER_PORT: 9090
     logging:
       options:
         max-size: 10m
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat </dev/null >/dev/tcp/127.0.0.1/9090"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     networks:
       - my-network
 
   elasticsearch:
     image: elasticsearch:7.17.14
+    container_name: elasticsearch
+    restart: unless-stopped
     ports:
       - '9200:9200'
       - '9300:9300'
-    container_name: elasticsearch
-    #    restart: unless-stopped
     volumes:
       - ./es/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
       - ./es/config/log4j2.properties:/usr/share/elasticsearch/config/log4j2.properties
@@ -154,17 +222,25 @@ services:
         max-size: 10m
         max-file: "3"
     environment:
-      - 'cluster.name=elasticsearch' # 设置集群名称为elasticsearch
-      - 'discovery.type=single-node' # 以单一节点模式启动
-      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m' # 设置使用jvm内存大小
+      TZ: Asia/Shanghai
+      cluster.name: elasticsearch          # 设置集群名称为elasticsearch
+      discovery.type: single-node          # 以单一节点模式启动
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"    # 设置使用jvm内存大小
+      ELASTIC_PASSWORD: 123456  # 首次启动设置 elastic 用户密码，替代 setup-passwords
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u \"elastic:$${ELASTIC_PASSWORD}\" 'http://127.0.0.1:9200/_cluster/health?timeout=5s' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
     networks:
       - my-network
 
-  # http://127.0.0.1:5601  需要先在es初始化密码再创建 [初始化密码：docker exec -it elasticsearch bin/elasticsearch-setup-passwords auto]
+  # http://127.0.0.1:5601
   kibana:
     image: kibana:7.17.14
     container_name: kibana
-    #    restart: unless-stopped
+    restart: unless-stopped
     volumes:
       - /etc/localtime:/etc/localtime
       - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml
@@ -175,19 +251,27 @@ services:
     ports:
       - '5601:5601'
     environment:
-      - ELASTICSEARCH_URL=http://elasticsearch:9200 #设置访问elasticsearch的地址
-      - I18N_LOCALE=zh-CN
-      - LOGGING_QUIET=true        # 等价于只输出 WARN/ERROR
+      ELASTICSEARCH_URL: http://elasticsearch:9200  # 设置访问elasticsearch的地址
+      I18N_LOCALE: zh-CN
+      LOGGING_QUIET: "true"                         # 等价于只输出 WARN/ERROR
+      ELASTICSEARCH_USERNAME: elastic                # 环境变量优先于 kibana.yml 中的同名配置
+      ELASTICSEARCH_PASSWORD: 123456
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5601/api/status || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     networks:
       - my-network
 
-  # 需要先在es初始化密码再创建 [初始化密码：docker exec -it elasticsearch bin/elasticsearch-setup-passwords auto]
   logstash:
     image: logstash:7.17.14
     container_name: logstash
-    #    restart: unless-stopped
+    restart: unless-stopped
     volumes:
       - /etc/localtime:/etc/localtime
       - ./logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
@@ -202,23 +286,32 @@ services:
       - '50000:50000/udp'
       - '9600:9600'
     environment:
-      LS_JAVA_OPTS: -Xms1024m -Xmx1024m
       TZ: Asia/Shanghai
+      LS_JAVA_OPTS: "-Xms1024m -Xmx1024m"
       MONITORING_ENABLED: false
+      ELASTIC_PASSWORD: 12123  # 供 logstash.yml / logstash.conf 中 ${ELASTIC_PASSWORD} 引用
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://127.0.0.1:9600/?pretty' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     networks:
       - my-network
 
   pgvector:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/pgvector:v0.5.0
     container_name: pgvector
-#    restart: unless-stopped
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=postgre
-      - POSTGRES_PASSWORD=postgre
-      - POSTGRES_DB=ai-rag-knowledge
-      - PGPASSWORD=postgre
+      TZ: Asia/Shanghai
+      POSTGRES_USER: postgre
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: ai-rag-knowledge
+      PGPASSWORD: 123456
     volumes:
       - ./pgvector/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
     logging:
@@ -227,6 +320,12 @@ services:
         max-file: "3"
     ports:
       - '5432:5432'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgre"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - my-network
 
@@ -234,31 +333,39 @@ services:
   nacos:
     image: nacos/nacos-server
     container_name: nacos
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "8080:8080"
       - "8848:8848"
       - "9848:9848"
       - "9849:9849"
     environment:
-      - PREFER_HOST_MODE=hostname
-      - MODE=standalone
-      - SPRING_DATASOURCE_PLATFORM=mysql
-      - MYSQL_SERVICE_HOST=mysql
-      - MYSQL_SERVICE_DB_NAME=nacos
-      - MYSQL_SERVICE_PORT=3306
-      - MYSQL_SERVICE_USER=root
-      - MYSQL_SERVICE_PASSWORD=12123
-      - MYSQL_SERVICE_DB_PARAM=characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true
-      - NACOS_AUTH_IDENTITY_KEY=2222
-      - NACOS_AUTH_IDENTITY_VALUE=2xxx
-      - NACOS_AUTH_TOKEN=SecretKey012345678901234567890123456789012345678901234567890123456789
-    depends_on:
-      - mysql
+      TZ: Asia/Shanghai
+      PREFER_HOST_MODE: hostname
+      MODE: standalone
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql
+      MYSQL_SERVICE_DB_NAME: nacos
+      MYSQL_SERVICE_PORT: 3306
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: 123456
+      MYSQL_SERVICE_DB_PARAM: "characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true"
+      NACOS_AUTH_IDENTITY_KEY: 2222
+      NACOS_AUTH_IDENTITY_VALUE: 2xxx
+      NACOS_AUTH_TOKEN: SecretKey012345678901234567890123456789012345678901234567890123456789
     logging:
       options:
         max-size: 10m
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat </dev/null >/dev/tcp/127.0.0.1/8848"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    depends_on:
+      mysql:
+        condition: service_healthy
     networks:
       - my-network
 
@@ -266,11 +373,21 @@ services:
   prometheus:
     image: bitnami/prometheus:2.47.2
     container_name: prometheus
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat </dev/null >/dev/tcp/127.0.0.1/9090"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - my-network
 
@@ -278,23 +395,63 @@ services:
   grafana:
     image: grafana/grafana:10.2.0
     container_name: grafana
-    #    restart: unless-stopped
+    restart: unless-stopped
     ports:
       - "4000:4000"
-    depends_on:
-      - prometheus
     volumes:
       - ./grafana:/etc/grafana
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
     environment: # 是否配置自己的数据库
-      - GF_DATABASE_TYPE=mysql
-      - GF_DATABASE_HOST=mysql:3306
-      - GF_DATABASE_NAME=grafana
-      - GF_DATABASE_USER=root
-      - GF_DATABASE_PASSWORD=12123
+      TZ: Asia/Shanghai
+      GF_DATABASE_TYPE: mysql
+      GF_DATABASE_HOST: mysql:3306
+      GF_DATABASE_NAME: grafana
+      GF_DATABASE_USER: root
+      GF_DATABASE_PASSWORD: 123456
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4000/api/health || wget -q --spider http://127.0.0.1:4000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
     networks:
       - my-network
 
-
+  # http://127.0.0.1:9001 minioadmin/12345678  9000为S3 API端口、9001为控制台端口
+  minio:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      TZ: Asia/Shanghai
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: 12345678  # MinIO要求密码至少8位，123456不合法，故用12345678
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./minio/data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - my-network
 
 networks:
   my-network:

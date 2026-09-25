@@ -8,6 +8,7 @@ server.shutdownTimeout: "5s"
 elasticsearch.hosts: [ "http://elasticsearch:9200" ]
 monitoring.ui.container.elasticsearch.enabled: true
 i18n.locale: "zh-CN"
-# 如开启权限es认证，需改为实际的用户名和密码
-elasticsearch.username: "kibana_system"
-elasticsearch.password: "xxx"
+# ES 安全认证账号不在此配置。注意：Kibana 7.17 的 kibana.yml 不支持 logstash.conf
+# 那样的 ${ENV} 环境变量引用（写进去会被当作字面密码导致 401），
+# 官方等价机制是 docker-compose 中 kibana 服务的 ELASTICSEARCH_USERNAME /
+# ELASTICSEARCH_PASSWORD 环境变量，效果相同：改密码只改 compose，本文件零维护
