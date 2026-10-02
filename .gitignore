@@ -33,3 +33,8 @@ build/
 /dev-ops/mysql/sql/marketing.sql
 /dev-ops/mysql/sql/marketing_01.sql
 /dev-ops/mysql/sql/marketing_02.sql
+
+### Docker 运行时数据（容器自动生成，不入库） ###
+/dev-ops/etcd/
+/dev-ops/milvus/
+/dev-ops/minio/data/
