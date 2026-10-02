@@ -17,6 +17,11 @@
 #     kibana / logstash / canal-adapter 直接以 elastic 认证，up 一条命令即可全链路打通。
 #   - mysql 首次启动后会执行 ./mysql/sql 下的初始化脚本；./mysql/data 已有数据时
 #     不会重复执行，且此时修改 MYSQL_ROOT_PASSWORD 不会生效（需重建数据目录）
+#   - milvus 单机版的元数据用独立 etcd 服务（客户端端口 2379），对象存储复用上面的
+#     minio 服务（自动创建独立桶 milvus，与业务文件按桶隔离），SDK 连接 19530 端口，
+#     鉴权账号 root / 123456（通过 COMMON_SECURITY_DEFAULTROOTPASSWORD 设置，仅首次
+#     启动生效，修改密码需重建 ./milvus 元数据目录）；若修改 MINIO_ROOT_PASSWORD 需同步修改 milvus
+#   - attu 为 milvus 的官方图形化管理控制台（http://127.0.0.1:8000，登录 root / 123456）
 # =====================================================================
 services:
 
@@ -429,7 +434,7 @@ services:
 
   # http://127.0.0.1:9001 minioadmin/12345678  9000为S3 API端口、9001为控制台端口
   minio:
-    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    image: rancher/mirrored-minio-minio:RELEASE.2023-07-07T07-13-57Z
     container_name: minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -443,7 +448,8 @@ services:
     volumes:
       - ./minio/data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # rancher 镜像内无 mc 命令，改用 curl 探测官方 live 健康端点
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -452,6 +458,102 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+    networks:
+      - my-network
+
+  # milvus 依赖的元数据存储 etcd（2379为客户端端口，一般仅 milvus 内部访问）
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: etcd
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    ports:
+      - "2379:2379"  # 客户端端口，供宿主机排查/运维使用，milvus 仍走容器网络内部
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - ./etcd/data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - my-network
+
+  # 127.0.0.1:19530 root/123456  19530为SDK gRPC端口、9091为健康检查/指标端口
+  milvus:
+    image: milvusdb/milvus:v2.6.23
+    container_name: milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      TZ: Asia/Shanghai
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000            # 复用上面的 minio 服务
+      MINIO_ACCESSKEYID: minioadmin        # 与 minio 服务保持一致
+      MINIO_SECRETACCESSKEY: 12345678
+      MINIO_BUCKETNAME: milvus             # 独立桶，与业务文件按桶隔离，首次启动自动创建
+      COMMON_SECURITY_AUTHORIZATIONENABLED: "true"  # 开启鉴权
+      COMMON_SECURITY_DEFAULTROOTPASSWORD: 123456   # root 初始密码，仅首次启动生效
+    ports:
+      - "19530:19530"
+      - "19091:9091"  # 宿主机 9091 已被 xxl-job-admin 占用，指标端口改为 19091
+    volumes:
+      - ./milvus/data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9091/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - my-network
+
+  # http://127.0.0.1:8000 root/123456  Milvus官方图形化管理控制台
+  attu:
+    image: zilliz/attu:v2.6.5
+    container_name: attu
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MILVUS_URL: milvus:19530  # 走容器网络直连 milvus，登录页会自动带出地址
+    ports:
+      - "8000:3000"
+    healthcheck:
+      # attu 镜像内无 wget/curl，用自带 node 发起健康探测
+      test: ["CMD-SHELL", "node -e 'require(\"http\").get(\"http://127.0.0.1:3000\",r=>process.exit(r.statusCode<400?0:1)).on(\"error\",()=>process.exit(1))'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    depends_on:
+      milvus:
+        condition: service_healthy
     networks:
       - my-network
 
