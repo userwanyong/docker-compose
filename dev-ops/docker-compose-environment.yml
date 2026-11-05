@@ -25,6 +25,7 @@
 # =====================================================================
 services:
 
+  # 127.0.0.1:13306 root/123456
   mysql:
     image: mysql:8.0.32
     container_name: mysql
@@ -54,6 +55,7 @@ services:
         max-size: 10m
         max-file: "3"
 
+  # 127.0.0.1:16379 密码123456
   redis:
     image: redis:6.2
     container_name: redis
@@ -79,6 +81,7 @@ services:
     networks:
       - my-network
 
+  # 127.0.0.1:11111 canal实例TCP端口
   canal-server:
     image: canal/canal-server:v1.1.7
     container_name: canal-server
@@ -107,6 +110,7 @@ services:
     networks:
       - my-network
 
+  # 127.0.0.1:8081
   canal-adapter:
     image: dyrnq/canal-adapter:1.1.7
     container_name: canal-adapter
@@ -162,6 +166,7 @@ services:
     networks:
       - my-network
 
+  # 127.0.0.1:2181
   zookeeper:
     image: zookeeper:3.9.0
     container_name: zookeeper
@@ -215,6 +220,7 @@ services:
     networks:
       - my-network
 
+  # http://127.0.0.1:9200 elastic/123456
   elasticsearch:
     image: elasticsearch:7.17.14
     container_name: elasticsearch
@@ -276,6 +282,7 @@ services:
     networks:
       - my-network
 
+  # 127.0.0.1:4560 日志采集TCP入口、9600为监控端口
   logstash:
     image: logstash:7.17.14
     container_name: logstash
@@ -309,6 +316,7 @@ services:
     networks:
       - my-network
 
+  # 127.0.0.1:5432 postgre/123456
   pgvector:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/pgvector:v0.5.0
     container_name: pgvector
