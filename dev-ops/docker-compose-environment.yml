@@ -25,6 +25,7 @@
 # =====================================================================
 services:
 
+  # mysql
   mysql:
     image: mysql:8.0.32
     container_name: mysql
@@ -54,6 +55,7 @@ services:
         max-size: 10m
         max-file: "3"
 
+  # redis
   redis:
     image: redis:6.2
     container_name: redis
@@ -79,6 +81,7 @@ services:
     networks:
       - my-network
 
+  # canal-server
   canal-server:
     image: canal/canal-server:v1.1.7
     container_name: canal-server
@@ -107,6 +110,7 @@ services:
     networks:
       - my-network
 
+  # canal-adapter
   canal-adapter:
     image: dyrnq/canal-adapter:1.1.7
     container_name: canal-adapter
@@ -162,6 +166,7 @@ services:
     networks:
       - my-network
 
+  # zookeeper
   zookeeper:
     image: zookeeper:3.9.0
     container_name: zookeeper
@@ -215,6 +220,7 @@ services:
     networks:
       - my-network
 
+  # elasticsearch
   elasticsearch:
     image: elasticsearch:7.17.14
     container_name: elasticsearch
@@ -276,6 +282,7 @@ services:
     networks:
       - my-network
 
+  # logstash
   logstash:
     image: logstash:7.17.14
     container_name: logstash
@@ -309,6 +316,7 @@ services:
     networks:
       - my-network
 
+  # pgvector
   pgvector:
     image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/pgvector:v0.5.0
     container_name: pgvector
